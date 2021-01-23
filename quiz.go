@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -25,12 +26,15 @@ func init() {
 
 func main() {
 	flag.Parse()
-	quiz := readCSV(filename)
+	quiz, err := readCSVFile(filename)
+	if err != nil {
+		log.Fatal(err)
+	}
 	if shuffle {
 		shuffleQuiz(quiz)
 	}
 	initializeQuiz()
-	fmt.Printf("Time limit for the quiz is: %d\n", timeLimit)
+	fmt.Printf("\t\t\t\tTime limit for the quiz is: %d seconds\n", timeLimit)
 	done := make(chan struct{})
 	time.AfterFunc(time.Duration(timeLimit)*time.Duration(time.Second), func() {
 		done <- struct{}{}
@@ -44,55 +48,64 @@ func shuffleQuiz(quiz []Quiz) {
 }
 
 func initializeQuiz() {
-	fmt.Println("Welcome to the Quiz Game")
+	fmt.Println("\t\t\t\tWelcome to the Quiz")
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("Press ENTER to start")
+	fmt.Println("\t\t\t\tPress ENTER to start")
 	reader.ReadByte()
 }
 
 func startQuiz(quiz []Quiz, done <-chan struct{}) {
 	correctAnswerCount := 0
 	reader := bufio.NewReader(os.Stdin)
-	go func() {
+	mutex := &sync.Mutex{}
+	go func(mutex *sync.Mutex) {
 		for i := range quiz {
 			fmt.Printf(quiz[i].Question + "\t")
 			input, _ := reader.ReadString('\n')
 			trimmedInput := strings.TrimRight(input, "\r\n")
 			isCorrect := strings.Compare(trimmedInput, quiz[i].Answer)
 			if isCorrect == 0 {
+				mutex.Lock()
 				correctAnswerCount++
+				mutex.Unlock()
 			}
 		}
-	}()
+	}(mutex)
 	<-done
-	fmt.Printf("\nTotal correct answers: %d\n", correctAnswerCount)
+	mutex.Lock()
+	fmt.Printf("\nTotal correct answers: %d/%d\n", correctAnswerCount, len(quiz))
+	mutex.Unlock()
 	if correctAnswerCount == len(quiz) {
-		fmt.Printf("Hurray! You answered all the questions correctly. You must be a Genius!")
+		fmt.Printf("Hurray! You answered all the questions correctly.")
 	} else if correctAnswerCount == 0 {
-		fmt.Printf("What a dumbass!")
+		fmt.Printf("Ouch!")
 	}
 }
 
-func readCSV(filename string) []Quiz {
-	csvFile, _ := os.Open(filename)
+func readCSVFile(filename string) ([]Quiz, error) {
+	csvFile, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
 	reader := csv.NewReader(bufio.NewReader(csvFile))
 	var quiz []Quiz
 	for {
-		line, error := reader.Read()
-		if error == io.EOF {
+		line, err := reader.Read()
+		if err == io.EOF {
 			break
-		} else if error != nil {
-			log.Fatal(error)
+		} else if err != nil {
+			return nil, err
 		}
 		quiz = append(quiz, Quiz{
 			Question: line[0],
 			Answer:   line[1],
 		})
 	}
-	return quiz
+	return quiz, nil
 }
 
+// Quiz holds a single question and its respective answer
 type Quiz struct {
-	Question string `json:Question`
-	Answer   string `json:Answer`
+	Question string
+	Answer   string
 }
