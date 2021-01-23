@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 	"strings"
 	"time"
@@ -14,15 +15,20 @@ import (
 
 var filename string
 var timeLimit int
+var shuffle bool
 
 func init() {
 	flag.StringVar(&filename, "csv", "problems.csv", "choice of .csv files loaded with problems")
 	flag.IntVar(&timeLimit, "time", 30, "time limit for the quiz (in number of seconds)")
+	flag.BoolVar(&shuffle, "shuffle", false, "to shuffle or not? that is the question. (options=true/false)")
 }
 
 func main() {
 	flag.Parse()
 	quiz := readCSV(filename)
+	if shuffle {
+		shuffleQuiz(quiz)
+	}
 	initializeQuiz()
 	fmt.Printf("Time limit for the quiz is: %d\n", timeLimit)
 	done := make(chan struct{})
@@ -30,6 +36,11 @@ func main() {
 		done <- struct{}{}
 	})
 	startQuiz(quiz, done)
+}
+
+func shuffleQuiz(quiz []Quiz) {
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(quiz), func(i, j int) { quiz[i], quiz[j] = quiz[j], quiz[i] })
 }
 
 func initializeQuiz() {
