@@ -9,38 +9,52 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 )
 
-var csvFlag string
+var filename string
+var timeLimit int
 
 func init() {
-	flag.StringVar(&csvFlag, "csv", "problems.csv", "choice of .csv files loaded with problems")
+	flag.StringVar(&filename, "csv", "problems.csv", "choice of .csv files loaded with problems")
+	flag.IntVar(&timeLimit, "time", 30, "time limit for the quiz (in number of seconds)")
 }
 
 func main() {
 	flag.Parse()
-	filename := csvFlag
 	quiz := readCSV(filename)
-	startQuiz(quiz)
+	initializeQuiz()
+	fmt.Printf("Time limit for the quiz is: %d\n", timeLimit)
+	done := make(chan struct{})
+	time.AfterFunc(time.Duration(timeLimit)*time.Duration(time.Second), func() {
+		done <- struct{}{}
+	})
+	startQuiz(quiz, done)
 }
 
-func startQuiz(quiz []Quiz) {
+func initializeQuiz() {
+	fmt.Println("Welcome to the Quiz Game")
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Println("Press ENTER to start")
+	reader.ReadByte()
+}
+
+func startQuiz(quiz []Quiz, done <-chan struct{}) {
 	correctAnswerCount := 0
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Println("Welcome to the Quiz Game ")
-	for i := range quiz {
-		fmt.Printf(quiz[i].Question + "\t")
-		answer, _ := reader.ReadString('\n')
-		answer = strings.TrimRight(answer, "\r\n")
-		true := strings.Compare(answer, quiz[i].Answer)
-		if true == 0 {
-			fmt.Printf("Correct!!\n")
-			correctAnswerCount++
-		} else {
-			fmt.Println("Wrong!!")
+	go func() {
+		for i := range quiz {
+			fmt.Printf(quiz[i].Question + "\t")
+			input, _ := reader.ReadString('\n')
+			trimmedInput := strings.TrimRight(input, "\r\n")
+			isCorrect := strings.Compare(trimmedInput, quiz[i].Answer)
+			if isCorrect == 0 {
+				correctAnswerCount++
+			}
 		}
-	}
-	fmt.Printf("Total correct answers: %d\n", correctAnswerCount)
+	}()
+	<-done
+	fmt.Printf("\nTotal correct answers: %d\n", correctAnswerCount)
 	if correctAnswerCount == len(quiz) {
 		fmt.Printf("Hurray! You answered all the questions correctly. You must be a Genius!")
 	} else if correctAnswerCount == 0 {
