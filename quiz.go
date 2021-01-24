@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/csv"
 	"flag"
 	"fmt"
@@ -35,11 +36,7 @@ func main() {
 	}
 	initializeQuiz()
 	fmt.Printf("\t\t\t\tTime limit for the quiz is: %d seconds\n", timeLimit)
-	done := make(chan struct{})
-	time.AfterFunc(time.Duration(timeLimit)*time.Duration(time.Second), func() {
-		done <- struct{}{}
-	})
-	startQuiz(quiz, done)
+	startQuiz(quiz, timeLimit)
 }
 
 func shuffleQuiz(quiz []Quiz) {
@@ -54,27 +51,49 @@ func initializeQuiz() {
 	reader.ReadByte()
 }
 
-func startQuiz(quiz []Quiz, done <-chan struct{}) {
+func startQuiz(quiz []Quiz, timeLimit int) {
 	correctAnswerCount := 0
 	reader := bufio.NewReader(os.Stdin)
-	mutex := &sync.Mutex{}
-	go func(mutex *sync.Mutex) {
-		for i := range quiz {
-			fmt.Printf(quiz[i].Question + "\t")
-			input, _ := reader.ReadString('\n')
-			trimmedInput := strings.TrimRight(input, "\r\n")
-			isCorrect := strings.Compare(trimmedInput, quiz[i].Answer)
-			if isCorrect == 0 {
-				mutex.Lock()
-				correctAnswerCount++
-				mutex.Unlock()
+	input := make(chan Quiz)
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go func(wg *sync.WaitGroup) {
+		for {
+			select {
+			case <-ctx.Done():
+				wg.Done()
+				return
+			case val := <-input:
+				fmt.Printf(val.Question + "\t")
+				input, _ := reader.ReadString('\n')
+				trimmedInput := strings.TrimRight(input, "\r\n")
+				isCorrect := strings.Compare(trimmedInput, val.Answer)
+				if isCorrect == 0 {
+					correctAnswerCount++
+				}
 			}
 		}
-	}(mutex)
-	<-done
-	mutex.Lock()
+	}(wg)
+	done := make(chan struct{})
+	time.AfterFunc(time.Duration(timeLimit)*time.Second, func() {
+		done <- struct{}{}
+	})
+	wg.Add(1)
+	go func(wg *sync.WaitGroup) {
+		for i := range quiz {
+			select {
+			case <-done:
+				cancelFunc()
+				wg.Done()
+				return
+			case input <- quiz[i]:
+			}
+		}
+	}(wg)
+	wg.Wait()
 	fmt.Printf("\nTotal correct answers: %d/%d\n", correctAnswerCount, len(quiz))
-	mutex.Unlock()
 	if correctAnswerCount == len(quiz) {
 		fmt.Printf("Hurray! You answered all the questions correctly.")
 	} else if correctAnswerCount == 0 {
